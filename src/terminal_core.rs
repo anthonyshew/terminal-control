@@ -6,7 +6,7 @@ use libghostty_vt::fmt::{Format, Formatter, FormatterOptions};
 use libghostty_vt::render::{CellIterator, CursorVisualStyle, Dirty, RowIterator};
 use libghostty_vt::screen::CellWide;
 use libghostty_vt::style::{PaletteIndex, RgbColor, Underline as GhosttyUnderline};
-use libghostty_vt::{RenderState, Terminal, TerminalOptions, terminal::Mode};
+use libghostty_vt::{RenderState, Terminal, terminal::Mode};
 
 use crate::frame::{
     Attributes, Cell, Color, Cursor, FORMAT_VERSION, Frame, Underline, indexed_color,
@@ -52,12 +52,20 @@ impl TerminalCore {
     ) -> Result<Self> {
         let responses = Rc::new(RefCell::new(Vec::new()));
         let bells = Rc::new(CounterCell::new(0_u64));
-        let mut terminal = Terminal::new(TerminalOptions {
-            cols,
-            rows,
-            max_scrollback,
-        })
-        .context("create Ghostty terminal")?;
+        let mut terminal = Terminal::new(cols, rows).context("create Ghostty terminal")?;
+        if max_scrollback == 0 {
+            // A zero line cap still retains history at page granularity. A zero
+            // byte cap preserves the old constructor's no-scrollback behavior.
+            terminal
+                .set_scrollback_max_bytes(Some(0))
+                .context("disable Ghostty scrollback")?;
+        } else {
+            // The old option is a line count, not a byte count. Keep Ghostty's
+            // default byte cap while applying the caller's history line limit.
+            terminal
+                .set_scrollback_max_lines(Some(max_scrollback))
+                .context("configure Ghostty scrollback lines")?;
+        }
         terminal
             .on_pty_write({
                 let responses = Rc::clone(&responses);
@@ -358,6 +366,37 @@ mod tests {
     use super::TerminalCore;
     use crate::frame::Color;
     use crate::terminal_theme::TerminalTheme;
+
+    #[test]
+    fn zero_scrollback_disables_history() {
+        let mut terminal = TerminalCore::new(1, 20, 0).unwrap();
+        assert_eq!(terminal.terminal.scrollback_max_bytes().unwrap(), Some(0));
+
+        let _responses = terminal.apply_output(b"history\r\nvisible");
+        assert_eq!(terminal.scrollback_text().unwrap(), b"visible");
+        assert_eq!(terminal.frame().unwrap().text(), "visible");
+
+        terminal.resize(10, 1, 9, 18).unwrap();
+        assert_eq!(terminal.scrollback_text().unwrap(), b"visible");
+    }
+
+    #[test]
+    fn nonzero_scrollback_preserves_line_limit_and_default_byte_cap() {
+        let default_terminal = libghostty_vt::Terminal::new(20, 1).unwrap();
+        let mut terminal = TerminalCore::new(1, 20, super::SCROLLBACK_ROWS).unwrap();
+        assert_eq!(
+            terminal.terminal.scrollback_max_lines().unwrap(),
+            Some(super::SCROLLBACK_ROWS)
+        );
+        assert_eq!(
+            terminal.terminal.scrollback_max_bytes().unwrap(),
+            default_terminal.scrollback_max_bytes().unwrap()
+        );
+
+        let _responses = terminal.apply_output(b"history\r\nvisible");
+        assert_eq!(terminal.scrollback_text().unwrap(), b"history\nvisible");
+        assert_eq!(terminal.frame().unwrap().text(), "visible");
+    }
 
     #[test]
     fn captures_terminal_responses() {

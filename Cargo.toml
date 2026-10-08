@@ -20,7 +20,7 @@ path = "src/main.rs"
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
 crossterm = "0.29"
-libghostty-vt = { version = "0.2.1", default-features = false }
+libghostty-vt = { git = "https://github.com/uzaaft/libghostty-rs", rev = "3c7766d4e5d6ce93870ad666a14c0b5a0e957360", default-features = false }
 portable-pty = "0.9.0"
 resvg = { version = "0.47.0", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
 rmcp = { version = "2.2.0", features = ["server", "transport-io", "schemars"] }
